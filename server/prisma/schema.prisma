@@ -1,0 +1,224 @@
+// Cloud-Based Network Alert Notification System — Database Schema
+// PostgreSQL via Prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  OPERATOR
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum DeviceType {
+  ROUTER
+  SWITCH
+  SERVER
+  FIREWALL
+  ACCESS_POINT
+  DATABASE_SERVER
+  OTHER
+}
+
+enum MonitorMode {
+  HTTP
+  TCP
+  SIMULATED
+}
+
+enum DeviceStatus {
+  ONLINE
+  WARNING
+  OFFLINE
+  UNKNOWN
+}
+
+enum CheckType {
+  HTTP
+  TCP
+  SIMULATED
+}
+
+enum AlertType {
+  DEVICE_OFFLINE
+  HIGH_LATENCY
+  REPEATED_FAILURE
+  RECOVERY
+}
+
+enum Severity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+enum AlertStatus {
+  ACTIVE
+  ACKNOWLEDGED
+  RESOLVED
+}
+
+enum NotificationChannel {
+  EMAIL
+  BROWSER
+}
+
+enum NotificationStatus {
+  SENT
+  FAILED
+  SKIPPED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  fullName     String
+  email        String   @unique
+  passwordHash String
+  role         Role     @default(OPERATOR)
+  status       UserStatus @default(ACTIVE)
+  lastLogin    DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  auditLogs    AuditLog[]
+  acknowledgedAlerts Alert[] @relation("AcknowledgedBy")
+  resolvedAlerts     Alert[] @relation("ResolvedBy")
+
+  @@index([email])
+}
+
+model Device {
+  id                String       @id @default(cuid())
+  name              String
+  ipAddress         String
+  hostname          String?
+  type              DeviceType   @default(OTHER)
+  location          String?
+  description       String?
+  monitorMode       MonitorMode  @default(SIMULATED)
+  checkUrl          String?      // for HTTP mode
+  port              Int?         // for TCP mode
+  monitoringInterval Int         @default(60)   // seconds
+  timeout           Int          @default(5000) // ms
+  warningThreshold  Int          @default(300)  // ms
+  criticalThreshold Int          @default(1000) // ms
+  failuresBeforeAlert Int        @default(2)
+  monitoringEnabled Boolean      @default(true)
+  simProfile        String       @default("stable") // stable | flaky | degraded | down
+  status            DeviceStatus @default(UNKNOWN)
+  consecutiveFailures Int        @default(0)
+  lastChecked       DateTime?
+  lastResponseTime  Int?
+  isActive          Boolean      @default(true)
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  monitoringResults MonitoringResult[]
+  alerts            Alert[]
+
+  @@index([status])
+  @@index([isActive])
+}
+
+model MonitoringResult {
+  id           String     @id @default(cuid())
+  deviceId     String
+  device       Device     @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  status       DeviceStatus
+  responseTime Int?
+  checkType    CheckType
+  errorMessage String?
+  checkedAt    DateTime   @default(now())
+
+  @@index([deviceId, checkedAt])
+}
+
+model Alert {
+  id           String      @id @default(cuid())
+  deviceId     String
+  device       Device      @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  type         AlertType
+  severity     Severity
+  message      String
+  status       AlertStatus @default(ACTIVE)
+  triggeredAt  DateTime    @default(now())
+  acknowledgedAt DateTime?
+  acknowledgedById String?
+  acknowledgedBy   User?   @relation("AcknowledgedBy", fields: [acknowledgedById], references: [id])
+  resolvedAt   DateTime?
+  resolvedById String?
+  resolvedBy   User?       @relation("ResolvedBy", fields: [resolvedById], references: [id])
+
+  notifications Notification[]
+
+  @@index([deviceId, status])
+  @@index([status])
+}
+
+model AlertRule {
+  id                  String   @id @default(cuid())
+  name                String
+  type                AlertType
+  enabled             Boolean  @default(true)
+  warningThresholdMs  Int?
+  criticalThresholdMs Int?
+  failuresBeforeAlert Int?
+  notifyEmail         Boolean  @default(true)
+  notifyBrowser       Boolean  @default(true)
+  severity            Severity @default(WARNING)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+model Notification {
+  id        String              @id @default(cuid())
+  alertId   String
+  alert     Alert               @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  channel   NotificationChannel
+  recipient String?
+  status    NotificationStatus
+  detail    String?
+  sentAt    DateTime            @default(now())
+
+  @@index([alertId])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action      String
+  description String
+  ipAddress   String?
+  createdAt   DateTime @default(now())
+
+  @@index([action])
+  @@index([createdAt])
+}
+
+model SystemSetting {
+  id                  String   @id @default("singleton")
+  systemName          String   @default("Cloud Network Alert")
+  organizationName    String   @default("Polytechnic Network Ops")
+  timezone            String   @default("Africa/Lagos")
+  defaultCheckInterval Int     @default(60)
+  defaultTimeout       Int     @default(5000)
+  defaultWarningMs     Int     @default(300)
+  defaultCriticalMs    Int     @default(1000)
+  emailEnabled         Boolean @default(false)
+  notifyRecipients     String  @default("")
+  notifySeverity       Severity @default(WARNING)
+  sessionMinutes        Int    @default(120)
+  passwordMinLength      Int   @default(8)
+  updatedAt            DateTime @updatedAt
+}
